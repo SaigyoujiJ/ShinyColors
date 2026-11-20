@@ -120,7 +120,7 @@ const transStory = async () => {
         setStoryMap(null)
         if (!Array.isArray(res)) return res
         const name = type.replace(/^\/assets\/json\//, '')
-        let storyMap
+        let storyMap = false
         if (config.story === 'edit') {
           saveData(res, name)
           showStoryTool(storyCache)
@@ -129,17 +129,38 @@ const transStory = async () => {
         if (storyCache.preview.has(name)) {
           storyMap = storyCache.preview.get(name)
         } else {
-          storyMap = await getStory(name)
+          // 人工译文层失败也吞掉异常，继续往下找 LLM 预生成译文 / 实时机翻
+          try {
+            storyMap = await getStory(name)
+          } catch (e) {
+            log(e)
+          }
         }
-        const commMap = await getCommStory()
+        let commMap = new Map()
+        try {
+          commMap = await getCommStory()
+        } catch (e) {
+          log(e)
+        }
         if (storyMap) {
           startTrans(res, storyMap, commMap)
         } else if (config.auto === 'on') {
-          let aiStoryMap = await getAIStory(name)
+          let aiStoryMap = false
+          try {
+            aiStoryMap = await getAIStory(name)
+          } catch (e) {
+            log(e)
+          }
           if (aiStoryMap) {
             startTrans(res, aiStoryMap, commMap)
           } else {
-            await autoTrans(res, name)
+            // LLM 预生成译文失败（含请求抛错）也继续降级到彩云 / 自有大模型
+            try {
+              await autoTrans(res, name)
+            } catch (e) {
+              log(e)
+              showAiTransHint('机翻失败：翻译流程异常', 'error')
+            }
           }
         } else {
           await autoTrans(res, name, false, true)

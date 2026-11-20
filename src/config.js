@@ -3,6 +3,7 @@ import isBoolean from 'lodash/isBoolean'
 import isPlainObject from 'lodash/isPlainObject'
 import { version } from '../package.json'
 import autoResize from './utils/autoResize'
+import { setupLLMConfig } from './utils/myLLM'
 
 const PREVIEW_COUNT = 5
 
@@ -130,10 +131,17 @@ const menuCommand = {
       config.dev = !config.dev
     }
   },
+  llm: {
+    id: 0, title: '设置自有 LLM（Key 仅存本机）',
+    callback: () => {
+      setupLLMConfig()
+    }
+  },
   update: {
     id: 0, title: '检查更新',
     callback: () => {
-      window.open(`${config.origin}/ShinyColors.user.js`)
+      // 不要打开官方脚本地址，否则脚本管理器会用官方版本覆盖本自制脚本
+      alert('自制脚本请在本地重新执行 npm run build 后手动更新')
     }
   },
   resize: {
@@ -171,7 +179,7 @@ const setGMMenuCommand = (type) => {
 
 const setAllGMMenuCommand = () => {
   if (!GM_registerMenuCommand || !GM_unregisterMenuCommand) return
-  const menuCommandList = ['update', 'bgm', 'story', 'origin', 'auto', 'transCover', 'dev', 'resize']
+  const menuCommandList = ['update', 'bgm', 'story', 'origin', 'auto', 'transCover', 'dev', 'resize', 'llm']
   menuCommandList.forEach(type => {
     setGMMenuCommand(type)
   })

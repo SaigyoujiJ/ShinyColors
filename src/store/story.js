@@ -3,6 +3,7 @@ import parseCsv from '../utils/parseCsv'
 import { getList, getLocalData, setLocalData } from './index'
 import { trimWrap, trim, uniqueStoryId } from '../utils/index'
 import config from '../config'
+import retryOnce from '../utils/retry'
 
 const storyTemp = new Map()
 const aiStoryTemp = new Map()
@@ -45,15 +46,35 @@ const getStoryMap = (csv, isAI) => {
   return storyMap
 }
 
+const isCsv = (v) => typeof v === 'string' && v.trim().length > 0
+
+const parseStoryMap = (csv, isAI) => {
+  try {
+    return getStoryMap(csv, isAI)
+  } catch (e) {
+    // CSV 结构异常（例如缺少「译者」行）不再让整段剧情翻译中断
+    console.warn('[sczh] 剧情 CSV 解析失败，降级到下一层', e)
+    return false
+  }
+}
+
 const getStory = async (name) => {
   if (!storyIndex) {
-    let storyIndexStr = await getLocalData('story.json')
+    const storyIndexStr = await getLocalData('story.json')
     if (!storyIndexStr) {
-      const storyIndexData = await fetchData('/story.json')
-      storyIndex = new Map(storyIndexData)
-      setLocalData('story.json', JSON.stringify(storyIndex))
+      const storyIndexData = await retryOnce(
+        () => fetchData('/story.json'), Array.isArray, '人工译文索引 story.json'
+      )
+      const ok = Array.isArray(storyIndexData)
+      storyIndex = new Map(ok ? storyIndexData : [])
+      // JSON.stringify(Map) 会得到 '{}'，必须转成数组才能被缓存正确还原
+      if (ok) setLocalData('story.json', JSON.stringify([...storyIndex]))
     } else {
-      storyIndex = new Map(JSON.parse(storyIndexStr))
+      try {
+        storyIndex = new Map(JSON.parse(storyIndexStr))
+      } catch (e) {
+        storyIndex = new Map()
+      }
     }
   }
   if (storyIndex.has(name)) {
@@ -61,8 +82,12 @@ const getStory = async (name) => {
       return storyTemp.get(name)
     } else {
       const fileName = storyIndex.get(name)
-      const csvStr = await fetchData(`/data/story/${fileName}.csv`)
-      const storyMap = getStoryMap(csvStr)
+      const csvStr = await retryOnce(
+        () => fetchData(`/data/story/${fileName}.csv`), isCsv, `人工译文 ${fileName}.csv`
+      )
+      if (!isCsv(csvStr)) return false
+      const storyMap = parseStoryMap(csvStr, false)
+      if (!storyMap) return false
       storyTemp.set(name, storyMap)
       return storyMap
     }
@@ -73,13 +98,21 @@ const getStory = async (name) => {
 
 const getAIStory = async (name) => {
   if (!aiStoryIndex) {
-    let aiStoryIndexStr = await getLocalData('story-ai.json')
+    const aiStoryIndexStr = await getLocalData('story-ai.json')
     if (!aiStoryIndexStr) {
-      const aiStoryIndexData = await fetchData(`${config.ai_host}/story.json`)
-      aiStoryIndex = new Map(aiStoryIndexData)
-      setLocalData('story-ai.json', JSON.stringify(aiStoryIndex))
+      const aiStoryIndexData = await retryOnce(
+        () => fetchData(`${config.ai_host}/story.json`), Array.isArray, 'LLM 译文索引 story.json'
+      )
+      const ok = Array.isArray(aiStoryIndexData)
+      // 两次都失败时置为空索引：本页不再重复请求，但返回 false 让上层降级到实时机翻
+      aiStoryIndex = new Map(ok ? aiStoryIndexData : [])
+      if (ok) setLocalData('story-ai.json', JSON.stringify([...aiStoryIndex]))
     } else {
-      aiStoryIndex = new Map(JSON.parse(aiStoryIndexStr))
+      try {
+        aiStoryIndex = new Map(JSON.parse(aiStoryIndexStr))
+      } catch (e) {
+        aiStoryIndex = new Map()
+      }
     }
   }
   if (aiStoryIndex.has(name)) {
@@ -87,8 +120,12 @@ const getAIStory = async (name) => {
       return aiStoryTemp.get(name)
     } else {
       const fileName = aiStoryIndex.get(name)
-      const csvStr = await fetchData(`${config.ai_host}/story/${fileName}.csv`)
-      const storyMap = getStoryMap(csvStr, true)
+      const csvStr = await retryOnce(
+        () => fetchData(`${config.ai_host}/story/${fileName}.csv`), isCsv, `LLM 译文 ${fileName}.csv`
+      )
+      if (!isCsv(csvStr)) return false
+      const storyMap = parseStoryMap(csvStr, true)
+      if (!storyMap) return false
       aiStoryTemp.set(name, storyMap)
       return storyMap
     }
@@ -99,16 +136,21 @@ const getAIStory = async (name) => {
 
 const getCommStory = async () => {
   if (!commStoryLoaded) {
-    const list = await getList('comm-story')
-    list.forEach(item => {
-      if (item?.text) {
-        const text = trimWrap(item.text)
-        const trans = trimWrap(item.trans, true)
-        if (text && trans && text !== trans) {
-          commStoryMap.set(text, trans)
+    try {
+      const list = await getList('comm-story')
+      list.forEach(item => {
+        if (item?.text) {
+          const text = trimWrap(item.text)
+          const trans = trimWrap(item.trans, true)
+          if (text && trans && text !== trans) {
+            commStoryMap.set(text, trans)
+          }
         }
-      }
-    })
+      })
+    } catch (e) {
+      // 通用剧情表加载失败不应阻断后续所有翻译层
+      console.warn('[sczh] 通用剧情表加载失败，继续降级', e)
+    }
     commStoryLoaded = true
   }
 

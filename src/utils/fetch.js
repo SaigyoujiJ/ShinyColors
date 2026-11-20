@@ -1,19 +1,20 @@
 import config from '../config'
 import { isNewVersion } from './index'
+import retryOnce from './retry'
 
 const { origin, version } = config
 
 const saveManifest = async () => {
   const t = Math.floor(Date.now() / 1000 / 60 / 60 / 6)
-  const res = await fetch(`${origin}/manifest.json?t=${t}`)
-  if (res.ok) {
-    const data = await res.json()
-    data.time = Date.now()
-    localStorage.setItem('sczh:manifest', JSON.stringify(data))
-    return data
-  } else {
-    throw new Error(`${res.status} ${res.url}`)
-  }
+  const data = await retryOnce(async () => {
+    const res = await fetch(`${origin}/manifest.json?t=${t}`)
+    if (!res.ok) throw new Error(`${res.status} ${res.url}`)
+    return res.json()
+  }, d => d && d.version, 'manifest.json')
+  if (!data || !data.version) throw new Error('manifest.json 加载失败（已重试 1 次）')
+  data.time = Date.now()
+  localStorage.setItem('sczh:manifest', JSON.stringify(data))
+  return data
 }
 
 const getManifest = async () => {
@@ -29,7 +30,7 @@ const getManifest = async () => {
     if (isNewVersion(version, data.version)) {
       data = await saveManifest()
     } else {
-      setTimeout(saveManifest, 5 * 1000)
+      setTimeout(() => saveManifest().catch(() => {}), 5 * 1000)
     }
   }
   return data

@@ -6,12 +6,12 @@ import { terser } from 'rollup-plugin-terser'
 import { version } from '../package.json'
 
 const banner = `// ==UserScript==
-// @name         偶像大师ShinyColors汉化
-// @namespace    https://github.com/biuuu/ShinyColors
+// @name         偶像大师ShinyColors汉化（自有 LLM 兜底版）
+// @namespace    https://github.com/SaigyoujiJ/ShinyColors
 // @version      ${version}
-// @description  录剧情视频到公开的网站请先取得译者同意，提交翻译或问题请到 https://github.com/biuuu/ShinyColors
+// @description  官方数据源 + 本机自有 LLM 兜底；录剧情视频到公开网站请先取得译者同意
 // @icon         https://shinycolors.enza.fun/icon_192x192.png
-// @author       biuuu
+// @author       biuuu (locally modified)
 // @match        https://shinycolors.enza.fun/*
 // @run-at       document-start
 // @grant        GM_xmlhttpRequest
@@ -20,7 +20,7 @@ const banner = `// ==UserScript==
 // @connect      api.interpreter.caiyunai.com
 // @connect      translate.google.cn
 // @connect      fanyi.baidu.com
-// @updateURL    https://www.shiny.fun/ShinyColors.user.js
+// @connect      *
 // @supportURL   https://github.com/biuuu/ShinyColors/issues
 // ==/UserScript==`
 

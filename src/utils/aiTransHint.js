@@ -1,5 +1,4 @@
 import debounce from 'lodash/debounce'
-import { storyCache } from '../modules/story'
 
 const html = `
   <style>
@@ -15,6 +14,9 @@ const html = `
     border-radius: 4px;
     text-shadow: 1px 1px 3px rgb(0 0 0 / 24%);
   }
+  #sczh-aitrans-hint.error {
+    background-color: #d9534f;
+  }
   #sczh-aitrans-hint.hide {
     display: none !important;
   }
@@ -25,7 +27,7 @@ const html = `
 
 let htmlInserted = false
 let hideTimer
-const showAiTransHint = (text) => {
+const showAiTransHint = (text, status = 'ok') => {
   let box = null
   if (!htmlInserted) {
     htmlInserted = true
@@ -53,11 +55,8 @@ const showAiTransHint = (text) => {
       box.style.right = Math.floor(offsetRight + pos[0] * cw) + 'px'
       box.style.bottom = Math.floor(offsetTop + pos[1] * ch) + 'px'
       box.style.transform = `scale(${scale.toFixed(3)})`
-      if (storyCache.name) {
-        box.style.display = 'flex'
-      } else {
-        box.style.display = 'none'
-      }
+      // 显隐统一由 .hide 控制，不再依赖「剧情提取模式」，
+      // 否则普通游戏剧情下提示会被内联 display:none 静默隐藏。
     }, 300)
 
     setToolPos()
@@ -67,6 +66,7 @@ const showAiTransHint = (text) => {
 
   box = document.getElementById('sczh-aitrans-hint')
   box.textContent = text
+  box.classList.toggle('error', status === 'error')
 
   setTimeout(() => {
     box.classList.remove('hide')
