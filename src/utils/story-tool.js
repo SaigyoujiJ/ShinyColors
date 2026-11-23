@@ -7,7 +7,7 @@ import { getStoryMap } from '../store/story'
 const html = `
   <style>
   #sczh-story-tool {
-    position: absolute;
+    position: fixed;
     display: none;
     background: #ffffff;
     border-radius: 24px;
@@ -17,16 +17,24 @@ const html = `
     justify-content: center;
     color: #ff6499;
     text-shadow: 0 0 6px #fff;
-    cursor: pointer;
+    cursor: grab;
     user-select: none;
+    touch-action: none;
     width: 100px;
     height: 100px;
     font-size: 32px;
     border: 7px solid transparent;
     border-image: url(${config.origin}/data/image/border.png);
     border-image-slice: 7;
-    transform-origin: top right;
+    transform-origin: top left;
+    transition: opacity 0.3s, width 0.18s ease, left 0.18s ease, top 0.18s ease;
+  }
+  #sczh-story-tool.dragging {
+    cursor: grabbing;
     transition: opacity 0.3s;
+  }
+  #sczh-story-tool.expanded {
+    width: 200px;
   }
   .story-tool-btns {
     width: 100%;
@@ -69,17 +77,13 @@ const html = `
     z-index: 1;
     font-family: UDKakugo_SmallPr6-B;
     font-size: 15px;
+    cursor: pointer;
   }
-  #sczh-story-tool:hover {
-    width: 200px;
-  }
-  #sczh-story-tool:hover .story-tool-btns {
+  #sczh-story-tool.expanded .story-tool-btns,
+  #sczh-story-tool.expanded .btn-close-sczh {
     display: flex;
   }
-  #sczh-story-tool:hover .btn-close-sczh {
-    display: flex;
-  }
-  #sczh-story-tool:hover > .text-sczh {
+  #sczh-story-tool.expanded > .text-sczh {
     display: none;
   }
   #sczh-story-tool .btn-close-sczh:hover {
@@ -114,12 +118,88 @@ const savePreview = (map) => {
   sessionStorage.setItem('sczh:preview', JSON.stringify(newArr))
 }
 
+// 主体尺寸为未经 scale 的 CSS 像素。展开时宽度翻倍；关闭按钮在展开态
+// 溢出主体右上角，边界计算必须把这两处外溢量一并计入，否则贴边时会被裁切。
+const BTN_W = 100
+const BTN_H = 100
+const EXPANDED_W = 200
+const CLOSE_OVERFLOW_X = 25
+const CLOSE_OVERFLOW_Y = 20
+const EDGE_GAP = 8
+const DRAG_THRESHOLD = 5
+const CONTROL_SELECTOR = '#btn-download-sczh, #btn-close-sczh, #ipt-preview-sczh, .story-tool-btns label'
+
 let showToolFlag = false
 const showStoryTool = (storyCache) => {
   if (showToolFlag) return
   showToolFlag = true
   document.body.insertAdjacentHTML('beforeend', html)
   const cont = document.getElementById('sczh-story-tool')
+
+  let scale = 1
+  let expanded = false
+  let pinned = false          // 点击固定展开
+  let hovered = false         // 悬停临时展开，保留原有体验
+  let hoverLocked = false     // 点击收起后抑制 hover，直到指针移出再移入
+  let pointerInside = false
+  let dragging = false
+  let suppressClick = false
+  let userMoved = false
+  let dragState = null
+  let blurTimer
+
+  const num = (value) => {
+    const n = parseFloat(value)
+    return Number.isFinite(n) ? n : 0
+  }
+
+  /**
+   * 可移动区域边界：默认取视口；若页面存在 #sczh-story-boundary 容器则改用其可视矩形。
+   * left/top 为视口坐标，与 position: fixed 的 left/top 同一坐标系。
+   */
+  const getBoundary = () => {
+    const container = document.getElementById('sczh-story-boundary')
+    if (container && typeof container.getBoundingClientRect === 'function') {
+      const rect = container.getBoundingClientRect()
+      if (rect.width > 0 && rect.height > 0) {
+        return { left: rect.left, top: rect.top, width: rect.width, height: rect.height }
+      }
+    }
+    return {
+      left: 0,
+      top: 0,
+      width: document.documentElement.clientWidth,
+      height: document.documentElement.clientHeight
+    }
+  }
+
+  /** 把按钮连同展开内容与外溢的关闭按钮完整约束在边界内 */
+  const clampPosition = (left, top) => {
+    if (cont.style.left == null || cont.style.left === '' ||
+        cont.style.top == null || cont.style.top === '') return
+    const box = getBoundary()
+    const s = scale
+    const w = (expanded ? EXPANDED_W : BTN_W) * s
+    const h = BTN_H * s
+    const overflowRight = expanded ? CLOSE_OVERFLOW_X * s : 0
+    const overflowTop = expanded ? CLOSE_OVERFLOW_Y * s : 0
+    const minL = box.left + EDGE_GAP
+    const maxL = Math.max(minL, box.left + box.width - w - overflowRight - EDGE_GAP)
+    const minT = box.top + EDGE_GAP + overflowTop
+    const maxT = Math.max(minT, box.top + box.height - h - EDGE_GAP)
+    const nextL = Number.isFinite(left) ? left : num(cont.style.left)
+    const nextT = Number.isFinite(top) ? top : num(cont.style.top)
+    cont.style.left = `${Math.round(Math.min(Math.max(nextL, minL), maxL))}px`
+    cont.style.top = `${Math.round(Math.min(Math.max(nextT, minT), maxT))}px`
+  }
+
+  /** 展开状态统一由 JS 计算；拖动过程中强制收起，避免宽度突变与误触 */
+  const syncExpanded = () => {
+    expanded = !!(!dragging && !hoverLocked && (pinned || hovered))
+    cont.classList.toggle('expanded', expanded)
+    clampPosition()
+  }
+
   const setToolPos = debounce(() => {
     const pos = [0.017, 0.22]
     const size = [0.058, 0.058]
@@ -137,9 +217,17 @@ const showStoryTool = (storyCache) => {
       cw = height * 16 / 9
       offsetRight = (width - cw) / 2
     }
-    cont.style.right = Math.floor(offsetRight + pos[0] * cw) + 'px'
-    cont.style.top = Math.floor(offsetTop + pos[1] * ch) + 'px'
-    cont.style.transform = `scale(${(ch/900).toFixed(3)})`
+    scale = ch / 900
+    cont.style.transform = `scale(${scale.toFixed(3)})`
+    // 与旧实现的视觉位置一致：右边缘对齐 16:9 画面右侧内缩 1.7%；
+    // 改用 left/top + transform-origin: top left，便于拖动与边界计算。
+    // 用户拖动过之后，窗口变化只更新缩放并重新约束，不覆盖自定义位置。
+    if (!userMoved) {
+      const rightEdge = width - offsetRight - pos[0] * cw
+      cont.style.left = `${Math.floor(rightEdge - BTN_W * scale)}px`
+      cont.style.top = `${Math.floor(offsetTop + pos[1] * ch)}px`
+    }
+    clampPosition()
     // cont.style.width = Math.floor(size[0] * cw) + 'px'
     // cont.style.height = Math.floor(size[1] * cw) + 'px'
     // cont.style.fontSize = Math.floor(size[1] * cw * 0.35) + 'px'
@@ -153,6 +241,118 @@ const showStoryTool = (storyCache) => {
   setToolPos()
 
   window.addEventListener('resize', setToolPos)
+
+  const contBlur = () => {
+    clearTimeout(blurTimer)
+    blurTimer = setTimeout(() => {
+      cont.classList.add('blur')
+    }, 5000)
+  }
+
+  cont.addEventListener('mouseenter', () => {
+    pointerInside = true
+    clearTimeout(blurTimer)
+    cont.classList.remove('blur')
+    hovered = true
+    syncExpanded()
+  })
+
+  cont.addEventListener('mouseleave', () => {
+    pointerInside = false
+    hovered = false
+    hoverLocked = false
+    syncExpanded()
+    if (!dragging) contBlur()
+  })
+  contBlur()
+
+  /* ---------- 拖动：指针事件统一鼠标与触摸，超过阈值才判定为拖动 ---------- */
+  const onPointerDown = (e) => {
+    if (e.button !== undefined && e.button !== 0) return
+    dragState = {
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      left: num(cont.style.left),
+      top: num(cont.style.top)
+    }
+  }
+
+  const onPointerMove = (e) => {
+    if (!dragState) return
+    if (dragState.pointerId !== undefined && e.pointerId !== undefined &&
+        e.pointerId !== dragState.pointerId) return
+    const dx = e.clientX - dragState.startX
+    const dy = e.clientY - dragState.startY
+    if (!dragging) {
+      if (Math.sqrt(dx * dx + dy * dy) < DRAG_THRESHOLD) return
+      dragging = true
+      hovered = false
+      hoverLocked = false
+      cont.classList.add('dragging')
+      syncExpanded()
+      // 仅在确认为拖动后才捕获指针：既不受游戏页面阻止冒泡的影响，
+      // 也不会改变普通点击的 target（否则预览/下载/关闭会失效）
+      if (cont.setPointerCapture && e.pointerId !== undefined) {
+        try { cont.setPointerCapture(e.pointerId) } catch (err) {}
+      }
+    }
+    if (e.cancelable && e.preventDefault) e.preventDefault()
+    userMoved = true
+    clampPosition(dragState.left + dx, dragState.top + dy)
+  }
+
+  const onPointerUp = (e) => {
+    if (!dragState) return
+    if (e && dragState.pointerId !== undefined && e.pointerId !== undefined &&
+        e.pointerId !== dragState.pointerId) return
+    if (cont.releasePointerCapture && dragState.pointerId !== undefined) {
+      // 未真正捕获过时浏览器会抛错，忽略即可
+      try { cont.releasePointerCapture(dragState.pointerId) } catch (err) {}
+    }
+    if (dragging) {
+      // 拖动结束后浏览器仍可能派发一次 click，吞掉它，
+      // 避免误触「预览 / 下载 / 关闭」或误切换展开状态
+      suppressClick = true
+      setTimeout(() => { suppressClick = false }, 250)
+    }
+    dragging = false
+    dragState = null
+    cont.classList.remove('dragging')
+    syncExpanded()
+    if (!pointerInside) contBlur()
+  }
+
+  // 不在 pointerdown 时 setPointerCapture：捕获会改变紧随其后 click 的 target，
+  // 使「预览 / 下载 / 关闭」的点击失效。改为在 window 上监听 move/up。
+  cont.addEventListener('pointerdown', onPointerDown)
+  window.addEventListener('pointermove', onPointerMove, { passive: false })
+  window.addEventListener('pointerup', onPointerUp)
+  window.addEventListener('pointercancel', onPointerUp)
+
+  const isControl = (target) => !!(target && typeof target.closest === 'function' &&
+    target.closest(CONTROL_SELECTOR))
+
+  // 捕获阶段拦截拖动产生的 click；冒泡阶段处理「点击展开 / 收起」
+  cont.addEventListener('click', (e) => {
+    if (!suppressClick) return
+    suppressClick = false
+    if (e.preventDefault) e.preventDefault()
+    if (e.stopPropagation) e.stopPropagation()
+  }, true)
+
+  cont.addEventListener('click', (e) => {
+    if (isControl(e.target)) return
+    if (pinned) {
+      pinned = false
+      hoverLocked = true
+    } else {
+      pinned = true
+      hoverLocked = false
+    }
+    syncExpanded()
+  })
+
   const btnDl = document.getElementById('btn-download-sczh')
 
   btnDl.addEventListener('click', function () {
@@ -188,21 +388,6 @@ const showStoryTool = (storyCache) => {
       reader.readAsText(file)
     })
   })
-
-  let blurTimer
-  cont.addEventListener('mouseenter', () => {
-    clearTimeout(blurTimer)
-    cont.classList.remove('blur')
-  })
-
-  const contBlur = () => {
-    clearTimeout(blurTimer)
-    blurTimer = setTimeout(() => {
-      cont.classList.add('blur')
-    }, 5000)
-  }
-  cont.addEventListener('mouseleave' , contBlur)
-  contBlur()
 }
 
 export default showStoryTool
