@@ -148,6 +148,12 @@ const showStoryTool = (storyCache) => {
   let dragState = null
   let blurTimer
 
+  // 用户定位坐标：只在初始定位、拖动、resize 时改变。
+  // 展开时为防溢出产生的偏移是临时的，收起后按 userPos 恢复，不写回定位坐标。
+  const userPos = { left: 0, top: 0, ready: false }
+  // 实际显示坐标（可能被展开态边界钳制），拖动以此为起点保证视觉连续
+  const viewPos = { left: 0, top: 0 }
+
   const num = (value) => {
     const n = parseFloat(value)
     return Number.isFinite(n) ? n : 0
@@ -173,10 +179,13 @@ const showStoryTool = (storyCache) => {
     }
   }
 
-  /** 把按钮连同展开内容与外溢的关闭按钮完整约束在边界内 */
-  const clampPosition = (left, top) => {
-    if (cont.style.left == null || cont.style.left === '' ||
-        cont.style.top == null || cont.style.top === '') return
+  /**
+   * 依据当前展开状态，把用户定位坐标映射为实际显示坐标。
+   * 边界钳制只作用于显示坐标，不改写 userPos：展开时为容纳 200px 宽度
+   * 与关闭按钮外溢产生的左移是临时的，收起后会自动回到用户定位位置。
+   */
+  const clampPosition = () => {
+    if (!userPos.ready) return
     const box = getBoundary()
     const s = scale
     const w = (expanded ? EXPANDED_W : BTN_W) * s
@@ -187,10 +196,10 @@ const showStoryTool = (storyCache) => {
     const maxL = Math.max(minL, box.left + box.width - w - overflowRight - EDGE_GAP)
     const minT = box.top + EDGE_GAP + overflowTop
     const maxT = Math.max(minT, box.top + box.height - h - EDGE_GAP)
-    const nextL = Number.isFinite(left) ? left : num(cont.style.left)
-    const nextT = Number.isFinite(top) ? top : num(cont.style.top)
-    cont.style.left = `${Math.round(Math.min(Math.max(nextL, minL), maxL))}px`
-    cont.style.top = `${Math.round(Math.min(Math.max(nextT, minT), maxT))}px`
+    viewPos.left = Math.round(Math.min(Math.max(userPos.left, minL), maxL))
+    viewPos.top = Math.round(Math.min(Math.max(userPos.top, minT), maxT))
+    cont.style.left = `${viewPos.left}px`
+    cont.style.top = `${viewPos.top}px`
   }
 
   /** 展开状态统一由 JS 计算；拖动过程中强制收起，避免宽度突变与误触 */
@@ -224,8 +233,9 @@ const showStoryTool = (storyCache) => {
     // 用户拖动过之后，窗口变化只更新缩放并重新约束，不覆盖自定义位置。
     if (!userMoved) {
       const rightEdge = width - offsetRight - pos[0] * cw
-      cont.style.left = `${Math.floor(rightEdge - BTN_W * scale)}px`
-      cont.style.top = `${Math.floor(offsetTop + pos[1] * ch)}px`
+      userPos.left = Math.floor(rightEdge - BTN_W * scale)
+      userPos.top = Math.floor(offsetTop + pos[1] * ch)
+      userPos.ready = true
     }
     clampPosition()
     // cont.style.width = Math.floor(size[0] * cw) + 'px'
@@ -289,6 +299,10 @@ const showStoryTool = (storyCache) => {
       dragging = true
       hovered = false
       hoverLocked = false
+      // 以当前可见位置作为新的用户定位锚点：拖动开始时按钮会收起，
+      // 若沿用展开前的锚点会造成向右跳变
+      userPos.left = viewPos.left
+      userPos.top = viewPos.top
       cont.classList.add('dragging')
       syncExpanded()
       // 仅在确认为拖动后才捕获指针：既不受游戏页面阻止冒泡的影响，
@@ -299,7 +313,9 @@ const showStoryTool = (storyCache) => {
     }
     if (e.cancelable && e.preventDefault) e.preventDefault()
     userMoved = true
-    clampPosition(dragState.left + dx, dragState.top + dy)
+    userPos.left = dragState.left + dx
+    userPos.top = dragState.top + dy
+    clampPosition()
   }
 
   const onPointerUp = (e) => {
