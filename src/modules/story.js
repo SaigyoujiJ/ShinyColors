@@ -9,6 +9,7 @@ import { requestLog } from './request'
 import { getModule } from './get-module'
 import showAiTransHint from '../utils/aiTransHint'
 import { setStoryMap } from './story/trackStory'
+import hideTransCover from '../utils/transCoverHtml'
 import { getTextTrans, getSelectTrans } from './story/utils'
 
 export const storyCache = {
@@ -117,7 +118,10 @@ const transStory = async () => {
       type.includes('/business_unit_communication/')
     ) {
       try {
-        setStoryMap(null)
+        setStoryMap(null, null)
+        // 每次剧情资源开始加载即收起上一场景的浮层。跳过场景时游戏通常
+        // 不会再读取 currentTrack getter，清理不能只依赖 track 变化事件。
+        if (config.transCover === 'on') hideTransCover()
         if (!Array.isArray(res)) return res
         const name = type.replace(/^\/assets\/json\//, '')
         let storyMap = false
