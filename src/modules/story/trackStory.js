@@ -1,6 +1,6 @@
 import { getModule } from '../get-module'
 import { log, uniqueStoryId } from '../../utils/index'
-import transCover from '../../utils/transCoverHtml'
+import transCover, { hideTransCover } from '../../utils/transCoverHtml'
 import { getTextTrans, getSelectTrans } from './utils'
 import config from '../../config'
 
@@ -18,22 +18,24 @@ export function setStoryMap(val1, val2) {
 function handleTrackChange(instance, newValue, oldValue) {
   log('%cTrack changed!', 'color: green; font-weight: bold;');
   log('  New Value:', newValue);
-  // 在这里添加你自己的通知逻辑
-  if (!storyMap || !newValue) return
+  // 场景结束 / track 失效时先清理浮层：跳过场景时 load 开头会把 storyMap
+  // 置空，若沿用旧的 early return，清理分支会被整个吞掉，已显示的译文就会
+  // 一直残留在画面上。UI 清理不应依赖译文数据是否就绪。
+  if (!newValue || newValue.label === 'end' || newValue.textFrame === 'off') {
+    if (newValue && newValue.label === 'end') {
+      newStory = true
+    }
+    hideTransCover()
+    return
+  }
+  if (!storyMap) return
   if (newStory) {
     getId = uniqueStoryId()
     newStory = false
   }
-  if (newValue.label === 'end') {
-    newStory = true
-    transCover('')
-  }
   if (newValue.text) {
     const trans = getTextTrans(getId, storyMap, commMap, newValue)
     transCover(trans)
-  }
-  if (newValue.textFrame === 'off') {
-    transCover('')
   }
 }
 

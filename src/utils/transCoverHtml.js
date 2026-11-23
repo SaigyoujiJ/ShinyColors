@@ -65,4 +65,15 @@ const transCover = (text) => {
   typewriterEffect(text, box)
 }
 
+// 场景结束 / 被跳过时收起浮层。
+// 复用 transCover('') 取消正在进行的打字机动画并清空文本，再真正隐藏节点；
+// 浮层节点不存在时（未开启双语翻译）直接返回，不影响其他模式。
+const hideTransCover = () => {
+  const box = document.getElementById('sczh-trans-cover')
+  if (!box) return
+  transCover('')
+  box.classList.add('hide')
+}
+
+export { hideTransCover }
 export default transCover
