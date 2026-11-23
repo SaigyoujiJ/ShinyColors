@@ -9,7 +9,7 @@ import { requestLog } from './request'
 import { getModule } from './get-module'
 import showAiTransHint from '../utils/aiTransHint'
 import { setStoryMap } from './story/trackStory'
-import hideTransCover from '../utils/transCoverHtml'
+import { hideTransCover } from '../utils/transCoverHtml'
 import { getTextTrans, getSelectTrans } from './story/utils'
 
 export const storyCache = {
