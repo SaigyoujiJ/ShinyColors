@@ -296,13 +296,31 @@ const showStoryTool = (storyCache) => {
     const dy = e.clientY - dragState.startY
     if (!dragging) {
       if (Math.sqrt(dx * dx + dy * dy) < DRAG_THRESHOLD) return
+      const wasExpanded = expanded
       dragging = true
       hovered = false
       hoverLocked = false
-      // 以当前可见位置作为新的用户定位锚点：拖动开始时按钮会收起，
-      // 若沿用展开前的锚点会造成向右跳变
-      userPos.left = viewPos.left
-      userPos.top = viewPos.top
+      const baseLeft = userPos.ready ? viewPos.left : dragState.left
+      const baseTop = userPos.ready ? viewPos.top : dragState.top
+      // 展开态下按钮宽度翻倍，且贴近右边界时会被向左推移，指针往往落在右半边
+      // （或右上角外溢关闭按钮上）。开始拖动并收起为 100px 时，按相对比例重映射
+      // 抓点坐标，避免左对齐收缩导致按钮脱离指针向左漂移。
+      if (wasExpanded) {
+        const expandedW = EXPANDED_W * scale
+        const collapsedW = BTN_W * scale
+        const collapsedH = BTN_H * scale
+        const ratioX = expandedW > 0
+          ? Math.min(Math.max((dragState.startX - baseLeft) / expandedW, 0), 1)
+          : 0.5
+        const offsetY = Math.min(Math.max(dragState.startY - baseTop, 0), collapsedH)
+        dragState.left = dragState.startX - ratioX * collapsedW
+        dragState.top = dragState.startY - offsetY
+      } else {
+        dragState.left = baseLeft
+        dragState.top = baseTop
+      }
+      userPos.left = dragState.left
+      userPos.top = dragState.top
       cont.classList.add('dragging')
       syncExpanded()
       // 仅在确认为拖动后才捕获指针：既不受游戏页面阻止冒泡的影响，
